@@ -1,47 +1,42 @@
 #include <sys/stat.h>
 #include <fcntl.h>
-#include <unistd.h>
-#include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
 #include <termios.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <pthread.h>
+#include "my_monitor.h"
 
-int     usage()
+void     *writer(void *i)
 {
-  puts("Usage: ./reader [interface] [baudrate]");
-  return (EXIT_SUCCESS);
-}
+  int fd = *((int *) i);
+  char line[BUFSIZE];
 
-int     puterr(char *str)
-{
-  write(1, str, strlen(str));
-  return (EXIT_FAILURE);
-}
-
-int     is_nbr(char *n)
-{
-  int   i;
-
-  i = -1;
-  while (n[++i]) {
-    if (n[i] < '0' ||
-        n[i] > '9')
-      return (EXIT_FAILURE);
+  free(i);
+  //write(1, PROMPT, strlen(PROMPT));
+  //while (fgets(line, BUFSIZE, stdin))
+  while (read(0, line, BUFSIZE))
+  {
+    line[BUFSIZE] = 0;
+    //line[strcspn(line, "\n")] = '\0'; //remove fgets trailing newline
+    //write(1, RES, strlen(RES));
+    write(fd, line, BUFSIZE);
+    memset(line, 0, BUFSIZE);
+    fflush(stdin);
+    //write(1, PROMPT, strlen(PROMPT));
   }
-  return (EXIT_SUCCESS);
+  return NULL;
 }
 
-int     reader(char *tty, int baudrate)
+void reader(char *tty, int baudrate)
 {
   int   fd;
-  char  c;
+  pthread_t writer_th;
+  int *writer_fd;
   struct termios new;
   struct termios old;
 
   if ((fd = open(tty, O_RDWR | O_NOCTTY)) < 0)
-    return (EXIT_FAILURE);
+    pthread_exit(NULL);
 
   tcgetattr(fd, &old);
   tcgetattr(fd, &new);
@@ -62,14 +57,23 @@ int     reader(char *tty, int baudrate)
   tcsetattr(fd, TCSANOW, &new);
   tcflush(fd, TCIFLUSH);
 
-  while (read(fd, &c, 1)) {
-    write(1, &c, 1);
+  writer_fd = malloc(sizeof(*writer_fd));
+  *writer_fd = fd;
+  if (pthread_create(&writer_th, NULL, writer, (void*)writer_fd))
+    perror("writer_th create");
+  char line[BUFSIZE];
+  //while (read(fd, &c, 1))
+  while (read(fd, line, BUFSIZE))
+  {
+    line[BUFSIZE] = 0;
+    write(1, ".", 1);
+    write(1, line, BUFSIZE);
+    fflush(stdout);
   }
-
+  if (pthread_join(writer_th, NULL))
+    perror("writer_th join");
   tcsetattr(fd, TCSANOW, &old);
   close(fd);
-
-  return (EXIT_SUCCESS);
 }
 
 int     main(int ac, char **av)
@@ -80,5 +84,5 @@ int     main(int ac, char **av)
     return (puterr(strerror(errno)));
   if (is_nbr(av[2]))
     return (puterr("Invalid baudrate."));
-  return (reader(av[1], atoi(av[2])));
+  reader(av[1], atoi(av[2]));
 }
